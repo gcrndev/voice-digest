@@ -31,6 +31,21 @@ npm run typecheck
 npm run deploy
 ```
 
+## Cloudflare Git Deploy
+
+Use Cloudflare Workers Builds to connect this GitHub repository directly to the Worker.
+No GitHub Actions workflow is required.
+
+Recommended Cloudflare build settings:
+
+- Production branch: `main`
+- Root directory: `/`
+- Build command: `npm run typecheck`
+- Deploy command: `npx wrangler deploy`
+
+Worker runtime secrets such as `PAIRING_TOKEN` should stay in Cloudflare and local
+`.dev.vars`; do not commit them.
+
 Cloudflare resources:
 
 - R2 bucket: `voice-daily-digest`
