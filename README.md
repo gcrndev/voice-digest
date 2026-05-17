@@ -59,8 +59,37 @@ Create `voice-sync.env` from `voice-sync.env.example`, then run:
 python scripts/sync_voice_captures.py
 ```
 
+The script creates a local ignored `sync-manifest.json` automatically to avoid
+duplicating downloads across runs.
+
 Downloaded audio lands in:
 
 ```text
 C:\repositories\secondbrain\Meta\audio-captures\YYYY\MM\
 ```
+
+## Local Transcription
+
+Install the optional transcription dependency:
+
+```powershell
+pip install -r requirements-transcribe.txt
+```
+
+Then transcribe synced captures and create `voice-capture` notes in `00-Inbox`:
+
+```powershell
+python scripts/sync_voice_captures.py --transcribe
+```
+
+The transcription step only creates inbox notes after audio has been transcribed.
+
+To transcribe one local audio file for testing or recovery:
+
+```powershell
+python scripts/sync_voice_captures.py --audio C:\path\to\capture.webm
+```
+
+## Future Integrations
+
+See `FUTURE-INTEGRATION-PLAN.md`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download pending Voice Daily Digest audio captures from the Worker."""
+"""Sync and locally transcribe Voice Daily Digest audio captures."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sync pending voice captures into the local vault.")
     parser.add_argument("--config", default=str(CONFIG_PATH), help="Path to env-style config file.")
     parser.add_argument("--dry-run", action="store_true", help="List pending captures without downloading.")
+    parser.add_argument("--transcribe", action="store_true", help="Transcribe synced captures and create inbox notes.")
+    parser.add_argument("--audio", help="Transcribe one local audio file without calling the Worker.")
     args = parser.parse_args()
 
     config = load_config(pathlib.Path(args.config))
@@ -35,11 +37,16 @@ def main() -> int:
 
     manifest = load_manifest()
     client = SignedClient(base_url, device_id, device_secret)
-    pending = client.json_request("GET", "/api/pending").get("items", [])
+    if args.audio:
+        return transcribe_local_audio(config, vault_root, pathlib.Path(args.audio), args.dry_run)
 
+    if args.transcribe:
+        return transcribe_synced_captures(config, vault_root, manifest, client, args.dry_run)
+
+    pending = client.json_request("GET", "/api/pending").get("items", [])
     if not pending:
-      print("No pending captures.")
-      return 0
+        print("No pending captures.")
+        return 0
 
     print(f"Pending captures: {len(pending)}")
     for item in pending:
@@ -72,6 +79,99 @@ def main() -> int:
         save_manifest(manifest)
         print(f"Synced {capture_id} -> {target_path}")
 
+    return 0
+
+
+def transcribe_synced_captures(
+    config: dict[str, str],
+    vault_root: pathlib.Path,
+    manifest: dict,
+    client: "SignedClient",
+    dry_run: bool,
+) -> int:
+    captures = manifest.get("captures", {})
+    pending = [
+        (capture_id, capture)
+        for capture_id, capture in captures.items()
+        if capture.get("remote_status") == "synced" and not capture.get("note_file")
+    ]
+
+    if not pending:
+        print("No synced captures pending transcription.")
+        return 0
+
+    print(f"Synced captures pending transcription: {len(pending)}")
+    transcriber = None if dry_run else FasterWhisperTranscriber(config)
+    for capture_id, capture in pending:
+        created_at = parse_iso(capture["created_at"])
+        audio_path = vault_root / pathlib.Path(capture["audio_file"])
+        relative_note_path = note_relative_path(created_at, capture_id)
+        note_path = vault_root / relative_note_path
+
+        if dry_run:
+            print(f"Would transcribe {audio_path}")
+            print(f"Would create note -> {note_path}")
+            continue
+
+        if not audio_path.exists():
+            print(f"Skip missing audio: {audio_path}", file=sys.stderr)
+            continue
+
+        result = transcriber.transcribe(audio_path)
+        write_capture_note(
+            note_path=note_path,
+            created_at=created_at,
+            capture_id=capture_id,
+            audio_path=pathlib.Path(capture["audio_file"]),
+            transcript=result.text,
+            engine=result.engine,
+            confidence=result.confidence,
+        )
+        client.json_request("POST", f"/api/audio/{capture_id}/status", {"status": "transcribed"})
+
+        capture["note_file"] = str(relative_note_path).replace("\\", "/")
+        capture["remote_status"] = "transcribed"
+        capture["transcribed_at"] = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+        capture["transcription_engine"] = result.engine
+        capture["transcription_confidence"] = result.confidence
+        save_manifest(manifest)
+        print(f"Transcribed {capture_id} -> {note_path}")
+
+    return 0
+
+
+def transcribe_local_audio(
+    config: dict[str, str],
+    vault_root: pathlib.Path,
+    audio_path: pathlib.Path,
+    dry_run: bool,
+) -> int:
+    audio_path = audio_path.resolve()
+    if not audio_path.exists():
+        raise RuntimeError(f"Audio file not found: {audio_path}")
+
+    capture_id = audio_path.stem
+    created_at = created_at_from_capture_id(capture_id, audio_path)
+    relative_audio_path = audio_path.relative_to(vault_root)
+    relative_note_path = note_relative_path(created_at, capture_id)
+    note_path = vault_root / relative_note_path
+
+    if dry_run:
+        print(f"Would transcribe {audio_path}")
+        print(f"Would create note -> {note_path}")
+        return 0
+
+    result = FasterWhisperTranscriber(config).transcribe(audio_path)
+    write_capture_note(
+        note_path=note_path,
+        created_at=created_at,
+        capture_id=capture_id,
+        audio_path=relative_audio_path,
+        transcript=result.text,
+        engine=result.engine,
+        confidence=result.confidence,
+    )
+    print(f"Transcribed local audio -> {note_path}")
     return 0
 
 
@@ -121,6 +221,39 @@ class SignedClient:
             raise RuntimeError(f"HTTP {error.code} {path}: {detail}") from error
 
 
+class TranscriptionResult:
+    def __init__(self, text: str, engine: str, confidence: str) -> None:
+        self.text = text
+        self.engine = engine
+        self.confidence = confidence
+
+
+class FasterWhisperTranscriber:
+    def __init__(self, config: dict[str, str]) -> None:
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "Missing faster-whisper. Install it with: pip install faster-whisper"
+            ) from exc
+
+        self.model_name = config.get("VOICE_DIGEST_WHISPER_MODEL", "small")
+        self.language = empty_to_none(config.get("VOICE_DIGEST_TRANSCRIPTION_LANGUAGE", "pt"))
+        device = config.get("VOICE_DIGEST_WHISPER_DEVICE", "cpu")
+        compute_type = config.get("VOICE_DIGEST_WHISPER_COMPUTE_TYPE", "int8")
+        self.model = WhisperModel(self.model_name, device=device, compute_type=compute_type)
+
+    def transcribe(self, audio_path: pathlib.Path) -> TranscriptionResult:
+        segments, _info = self.model.transcribe(str(audio_path), language=self.language)
+        text = "\n".join(segment.text.strip() for segment in segments if segment.text.strip())
+        confidence = "medium" if text else "low"
+        return TranscriptionResult(
+            text=text or "_No speech detected._",
+            engine=f"faster-whisper:{self.model_name}",
+            confidence=confidence,
+        )
+
+
 def load_config(path: pathlib.Path) -> dict[str, str]:
     config: dict[str, str] = {}
     if path.exists():
@@ -140,6 +273,13 @@ def require(config: dict[str, str], key: str) -> str:
     return value
 
 
+def empty_to_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
 def load_manifest() -> dict:
     if not MANIFEST_PATH.exists():
         return {"synced_ids": [], "captures": {}}
@@ -154,6 +294,15 @@ def parse_iso(value: str) -> dt.datetime:
     return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def created_at_from_capture_id(capture_id: str, audio_path: pathlib.Path) -> dt.datetime:
+    prefix = capture_id.split("-", 1)[0]
+    try:
+        return dt.datetime.strptime(prefix, "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        mtime = dt.datetime.fromtimestamp(audio_path.stat().st_mtime, tz=dt.timezone.utc)
+        return mtime
+
+
 def audio_relative_path(created_at: dt.datetime, capture_id: str) -> pathlib.Path:
     return pathlib.Path(
         "Meta",
@@ -162,6 +311,54 @@ def audio_relative_path(created_at: dt.datetime, capture_id: str) -> pathlib.Pat
         f"{created_at.month:02d}",
         f"{capture_id}.webm",
     )
+
+
+def note_relative_path(created_at: dt.datetime, capture_id: str) -> pathlib.Path:
+    timestamp = created_at.astimezone(dt.timezone.utc).strftime("%Y-%m-%d-%H%M")
+    return pathlib.Path("00-Inbox", f"{timestamp}-voice-capture-{capture_id}.md")
+
+
+def write_capture_note(
+    note_path: pathlib.Path,
+    created_at: dt.datetime,
+    capture_id: str,
+    audio_path: pathlib.Path,
+    transcript: str,
+    engine: str,
+    confidence: str,
+) -> None:
+    if note_path.exists():
+        return
+
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    created = created_at.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    audio_file = str(audio_path).replace("\\", "/")
+    content = f"""---
+type: voice-capture
+status: pending-digestion
+created: {created}
+source: pwa
+audio_file: {audio_file}
+transcription_engine: {engine}
+confidence: {confidence}
+remote_id: {capture_id}
+---
+
+# Voice Capture - {created}
+
+## Transcript
+
+{transcript.strip()}
+
+## Initial Understanding
+
+_Pending agent digestion._
+
+## Canonical Fact Candidates
+
+_Pending agent digestion._
+"""
+    note_path.write_text(content, encoding="utf-8")
 
 
 if __name__ == "__main__":
