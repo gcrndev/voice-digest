@@ -1,0 +1,14 @@
+name = "voice-daily-digest"
+main = "src/worker.ts"
+compatibility_date = "2026-05-17"
+
+[[r2_buckets]]
+binding = "VOICE_AUDIO"
+bucket_name = "voice-daily-digest"
+
+[[kv_namespaces]]
+binding = "DEVICE_REGISTRY"
+id = "e215884bd6d341919ab0dcc99ff69467"
+
+[vars]
+MAX_UPLOAD_BYTES = "25000000"

@@ -1,0 +1,11 @@
+node_modules/
+.wrangler/
+.playwright-mcp/
+.dev.vars
+dist/
+*.log
+pairing-token.local.txt
+voice-sync.env
+sync-manifest.json
+__pycache__/
+*.pyc
