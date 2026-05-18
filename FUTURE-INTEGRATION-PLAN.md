@@ -6,6 +6,7 @@
 - Cloudflare Worker stores audio in R2 and tracks device auth in KV.
 - Local PC sync downloads pending audio into the Obsidian vault.
 - Local transcription uses `faster-whisper` on CPU.
+- `python scripts/sync_voice_captures.py --all` runs sync and transcription in one command.
 - Transcribed `voice-capture` notes land in `00-Inbox`.
 - The vault inbox workflow classifies voice captures like normal raw notes, integrates daily material into `07-Daily`, and archives processed captures.
 
@@ -17,8 +18,7 @@
 - Run sync and transcription on a fixed interval:
 
 ```powershell
-python scripts/sync_voice_captures.py
-python scripts/sync_voice_captures.py --transcribe
+python scripts/sync_voice_captures.py --all
 ```
 
 - Log output to local ignored files.

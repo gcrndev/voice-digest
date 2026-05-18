@@ -26,6 +26,7 @@ def main() -> int:
     parser.add_argument("--config", default=str(CONFIG_PATH), help="Path to env-style config file.")
     parser.add_argument("--dry-run", action="store_true", help="List pending captures without downloading.")
     parser.add_argument("--transcribe", action="store_true", help="Transcribe synced captures and create inbox notes.")
+    parser.add_argument("--all", action="store_true", help="Sync pending captures, then transcribe synced captures.")
     parser.add_argument("--audio", help="Transcribe one local audio file without calling the Worker.")
     args = parser.parse_args()
 
@@ -40,9 +41,24 @@ def main() -> int:
     if args.audio:
         return transcribe_local_audio(config, vault_root, pathlib.Path(args.audio), args.dry_run)
 
+    if args.all:
+        sync_result = sync_pending_captures(vault_root, manifest, client, args.dry_run)
+        if sync_result != 0:
+            return sync_result
+        return transcribe_synced_captures(config, vault_root, manifest, client, args.dry_run)
+
     if args.transcribe:
         return transcribe_synced_captures(config, vault_root, manifest, client, args.dry_run)
 
+    return sync_pending_captures(vault_root, manifest, client, args.dry_run)
+
+
+def sync_pending_captures(
+    vault_root: pathlib.Path,
+    manifest: dict,
+    client: "SignedClient",
+    dry_run: bool,
+) -> int:
     pending = client.json_request("GET", "/api/pending").get("items", [])
     if not pending:
         print("No pending captures.")
@@ -59,7 +75,7 @@ def main() -> int:
         relative_audio_path = audio_relative_path(created_at, capture_id)
         target_path = vault_root / relative_audio_path
 
-        if args.dry_run:
+        if dry_run:
             print(f"Would download {capture_id} -> {target_path}")
             continue
 

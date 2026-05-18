@@ -55,12 +55,17 @@ Cloudflare resources:
 - R2 bucket: `voice-daily-digest`
 - KV namespace binding: `DEVICE_REGISTRY`
 
-## Local Sync
+## Local Sync And Transcription
 
-Create `voice-sync.env` from `voice-sync.env.example`, then run:
+Create `voice-sync.env` from `voice-sync.env.example`, install the optional
+transcription dependency, then run:
 
 ```powershell
-python scripts/sync_voice_captures.py
+pip install -r requirements-transcribe.txt
+```
+
+```powershell
+python scripts/sync_voice_captures.py --all
 ```
 
 The script creates a local ignored `sync-manifest.json` automatically to avoid
@@ -72,18 +77,23 @@ Downloaded audio lands in:
 C:\repositories\secondbrain\Meta\audio-captures\YYYY\MM\
 ```
 
-## Local Transcription
+With `--all`, pending audio is synced first and then synced captures are
+transcribed into inbox notes.
 
-Install the optional transcription dependency:
+## Separate Local Transcription
 
-```powershell
-pip install -r requirements-transcribe.txt
-```
-
-Then transcribe synced captures and create `voice-capture` notes in `00-Inbox`:
+If audio was already synced and you only want to transcribe later, run:
 
 ```powershell
 python scripts/sync_voice_captures.py --transcribe
+```
+
+Use this only when you want to run transcription separately from sync.
+
+To sync without transcription, run:
+
+```powershell
+python scripts/sync_voice_captures.py
 ```
 
 The transcription step only creates inbox notes after audio has been transcribed.
