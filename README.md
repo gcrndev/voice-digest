@@ -97,3 +97,7 @@ python scripts/sync_voice_captures.py --audio C:\path\to\capture.webm
 ## Future Integrations
 
 See `FUTURE-INTEGRATION-PLAN.md`.
+
+## Usage
+
+See `USAGE.md` for the step-by-step workflow.
