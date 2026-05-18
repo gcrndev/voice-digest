@@ -35,9 +35,12 @@ python scripts/sync_voice_captures.py --transcribe
 
 ### 3. Remote Status Lifecycle
 
-- Keep current states: `uploaded`, `synced`, `transcribed`, `digested`.
-- Later, update remote status to `digested` after the vault agent processes the capture.
-- Decide whether audio should be retained or deleted after a grace period.
+- Keep Worker/R2 states limited to `uploaded` and `synced`.
+- Track local-only states in `sync-manifest.json` and vault frontmatter:
+  - `transcribed`
+  - `pending-digestion`
+  - `digested`
+- Decide whether remote audio should be retained or deleted after a grace period.
 
 ### 4. Device Management
 

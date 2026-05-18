@@ -2,6 +2,10 @@
 
 PWA + Cloudflare Worker + local sync for voice captures into the Obsidian vault.
 
+Remote Worker states are intentionally limited to `uploaded` and `synced`.
+Transcription and digestion status are local-only, tracked in `sync-manifest.json`
+and vault note frontmatter.
+
 Vault root:
 
 ```text

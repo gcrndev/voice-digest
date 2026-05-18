@@ -127,10 +127,8 @@ def transcribe_synced_captures(
             engine=result.engine,
             confidence=result.confidence,
         )
-        client.json_request("POST", f"/api/audio/{capture_id}/status", {"status": "transcribed"})
-
         capture["note_file"] = str(relative_note_path).replace("\\", "/")
-        capture["remote_status"] = "transcribed"
+        capture["local_status"] = "transcribed"
         capture["transcribed_at"] = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
         capture["transcription_engine"] = result.engine
         capture["transcription_confidence"] = result.confidence

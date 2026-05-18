@@ -7,7 +7,7 @@ interface Env {
   MAX_UPLOAD_BYTES?: string;
 }
 
-type Status = "uploaded" | "synced" | "transcribed" | "digested";
+type Status = "uploaded" | "synced";
 
 interface RegisteredDevice {
   id: string;
@@ -18,7 +18,7 @@ interface RegisteredDevice {
   revoked?: boolean;
 }
 
-const statuses: Status[] = ["uploaded", "synced", "transcribed", "digested"];
+const statuses: Status[] = ["uploaded", "synced"];
 const signatureWindowMs = 5 * 60 * 1000;
 
 export default {
