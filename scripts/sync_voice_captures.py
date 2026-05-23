@@ -116,13 +116,14 @@ def transcribe_synced_captures(
         print("No synced captures pending transcription.")
         return 0
 
-    print(f"Synced captures pending transcription: {len(pending)}")
+    log(f"Synced captures pending transcription: {len(pending)}")
     transcriber = None if dry_run else FasterWhisperTranscriber(config)
     for capture_id, capture in pending:
         created_at = parse_iso(capture["created_at"])
         audio_path = vault_root / pathlib.Path(capture["audio_file"])
         relative_note_path = note_relative_path(created_at, capture_id)
         note_path = vault_root / relative_note_path
+        log(f"Start {capture_id}: {audio_path}")
 
         if dry_run:
             print(f"Would transcribe {audio_path}")
@@ -133,7 +134,9 @@ def transcribe_synced_captures(
             print(f"Skip missing audio: {audio_path}", file=sys.stderr)
             continue
 
+        log("Status -> transcribing")
         result = transcriber.transcribe(audio_path)
+        log("Status -> writing note")
         write_capture_note(
             note_path=note_path,
             created_at=created_at,
@@ -149,7 +152,7 @@ def transcribe_synced_captures(
         capture["transcription_engine"] = result.engine
         capture["transcription_confidence"] = result.confidence
         save_manifest(manifest)
-        print(f"Transcribed {capture_id} -> {note_path}")
+        log(f"Done {capture_id} -> {note_path}")
 
     return 0
 
@@ -175,7 +178,9 @@ def transcribe_local_audio(
         print(f"Would create note -> {note_path}")
         return 0
 
+    log(f"Status -> transcribing local audio: {audio_path}")
     result = FasterWhisperTranscriber(config).transcribe(audio_path)
+    log("Status -> writing note")
     write_capture_note(
         note_path=note_path,
         created_at=created_at,
@@ -185,7 +190,7 @@ def transcribe_local_audio(
         engine=result.engine,
         confidence=result.confidence,
     )
-    print(f"Transcribed local audio -> {note_path}")
+    log(f"Done local audio -> {note_path}")
     return 0
 
 
@@ -255,12 +260,31 @@ class FasterWhisperTranscriber:
         self.language = empty_to_none(config.get("VOICE_DIGEST_TRANSCRIPTION_LANGUAGE", "pt"))
         device = config.get("VOICE_DIGEST_WHISPER_DEVICE", "cpu")
         compute_type = config.get("VOICE_DIGEST_WHISPER_COMPUTE_TYPE", "int8")
+        log(f"Loading faster-whisper model={self.model_name} device={device} compute_type={compute_type}")
         self.model = WhisperModel(self.model_name, device=device, compute_type=compute_type)
+        log("Whisper model ready")
 
     def transcribe(self, audio_path: pathlib.Path) -> TranscriptionResult:
-        segments, _info = self.model.transcribe(str(audio_path), language=self.language)
-        text = "\n".join(segment.text.strip() for segment in segments if segment.text.strip())
+        log(f"Transcription started: {audio_path}")
+        segments_iter, info = self.model.transcribe(str(audio_path), language=self.language)
+        duration_seconds = getattr(info, "duration", None)
+        segments = []
+        last_progress = -1
+        for segment in segments_iter:
+            text = segment.text.strip()
+            if not text:
+                continue
+            segments.append(text)
+            if duration_seconds:
+                progress = min(100, int((segment.end / duration_seconds) * 100))
+                if progress >= last_progress + 5:
+                    log(f"Transcribing... {progress}% ({format_timestamp(segment.end)} / {format_duration(duration_seconds)})")
+                    last_progress = progress
+            elif len(segments) % 10 == 0:
+                log(f"Transcribing... {len(segments)} segments ({format_timestamp(segment.end)})")
+        text = "\n".join(segments)
         confidence = "medium" if text else "low"
+        log(f"Transcription finished: {len(segments)} segments")
         return TranscriptionResult(
             text=text or "_No speech detected._",
             engine=f"faster-whisper:{self.model_name}",
@@ -306,6 +330,31 @@ def save_manifest(manifest: dict) -> None:
 
 def parse_iso(value: str) -> dt.datetime:
     return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def format_duration(seconds: float | int | None) -> str:
+    if seconds is None:
+        return "Unknown"
+    total = int(seconds)
+    minute, second = divmod(total, 60)
+    hour, minute = divmod(minute, 60)
+    if hour:
+        return f"{hour}:{minute:02d}:{second:02d}"
+    return f"{minute}:{second:02d}"
+
+
+def format_timestamp(seconds: float) -> str:
+    total = int(seconds)
+    minute, second = divmod(total, 60)
+    hour, minute = divmod(minute, 60)
+    if hour:
+        return f"{hour:02d}:{minute:02d}:{second:02d}"
+    return f"{minute:02d}:{second:02d}"
+
+
+def log(message: str, stream=sys.stdout) -> None:
+    timestamp = dt.datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {message}", file=stream, flush=True)
 
 
 def created_at_from_capture_id(capture_id: str, audio_path: pathlib.Path) -> dt.datetime:
